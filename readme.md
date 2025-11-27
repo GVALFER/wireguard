@@ -13,7 +13,6 @@ Three simple scripts that automatically detect your network configuration and se
 ### ✨ Features
 
 - 🔍 **Auto-detects network interfaces** - No manual NIC configuration needed
-- 🎯 **Minimal questions** - Smart defaults for everything
 - 🔧 **Generic design** - Works for any network setup (not just IPMIs)
 - 📱 **QR codes** - Instant mobile device setup
 - 🛡️ **Security first** - Pre-shared keys and proper iptables rules
@@ -49,12 +48,11 @@ Three simple scripts that automatically detect your network configuration and se
 
 ## 🚀 Quick Start
 
-### 1. Download Scripts
+### 1. Clone Repository
 
 ```bash
-curl -O https://raw.githubusercontent.com/your-repo/wireguard-scripts/main/install-wireguard.sh
-curl -O https://raw.githubusercontent.com/your-repo/wireguard-scripts/main/create-client.sh  
-curl -O https://raw.githubusercontent.com/your-repo/wireguard-scripts/main/wg-manage.sh
+git clone https://github.com/GVALFER/wireguard.git
+cd wireguard
 chmod +x *.sh
 ```
 
