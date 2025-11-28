@@ -37,27 +37,6 @@ if [[ -z "$PUBLIC_IP" ]]; then
     error "Failed to detect public IP. Check internet connection."
 fi
 
-# Ask user about domain preference
-echo ""
-ask "Do you want to use a custom domain for nginx? (y/N):"
-read -p "> " USE_DOMAIN
-USE_DOMAIN=${USE_DOMAIN:-n}
-
-if [[ $USE_DOMAIN =~ ^[Yy]$ ]]; then
-    ask "Enter your domain (e.g., vpn.yourdomain.com):"
-    read -p "> " CUSTOM_DOMAIN
-    if [[ -z "$CUSTOM_DOMAIN" ]]; then
-        warn "No domain provided, using IP address: $PUBLIC_IP"
-        SERVER_DOMAIN="$PUBLIC_IP"
-    else
-        log "Using custom domain: $CUSTOM_DOMAIN"
-        SERVER_DOMAIN="$CUSTOM_DOMAIN"
-    fi
-else
-    log "Using IP address: $PUBLIC_IP"
-    SERVER_DOMAIN="$PUBLIC_IP"
-fi
-
 # Auto-detect NICs
 log "Detecting network interfaces..."
 INTERFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep -E '^(eth|ens|enp|en[0-9])' | grep -v '@' | sort))
@@ -100,7 +79,6 @@ echo "Port: 51820"
 echo "VPN Network: 10.8.0.0/24"
 echo "Private Network: 10.10.1.0/24"
 echo "Public IP: $PUBLIC_IP"
-echo "Server Domain/IP: $SERVER_DOMAIN"
 echo "Download Server: nginx on port 8080"
 echo ""
 
@@ -123,8 +101,12 @@ log "Installing packages..."
 apt update -qq
 apt install -y wireguard wireguard-tools qrencode nginx openssl >/dev/null 2>&1
 
-# No need to check nginx modules - using simple file serving
-log "Configuring nginx for simple file downloads..."
+# Check nginx secure_link module
+log "Checking Nginx modules..."
+if ! nginx -V 2>&1 | grep -q "http_secure_link_module"; then
+    warn "Nginx secure_link module not found. Links may not work properly."
+    warn "Consider recompiling nginx with --with-http_secure_link_module"
+fi
 
 # Enable forwarding
 log "Enabling IP forwarding..."
@@ -143,8 +125,8 @@ SERVER_PUBLIC_KEY=$(cat server_public.key)
 
 # Save configuration for client script
 echo "$PUBLIC_IP" > server_public_ip.txt
-echo "$SERVER_DOMAIN" > server_domain.txt
-chmod 644 server_domain.txt
+echo "$SECRET_KEY" > server_secret_key.txt
+chmod 600 server_secret_key.txt
 
 # Create WireGuard config
 log "Creating WireGuard configuration..."
@@ -177,13 +159,13 @@ mkdir -p /var/www/wireguard-dl
 chown www-data:www-data /var/www/wireguard-dl
 chmod 755 /var/www/wireguard-dl
 
-# Configure Nginx for simple downloads
-log "Configuring Nginx for temporary downloads..."
+# Configure Nginx for secure downloads
+log "Configuring Nginx for secure downloads..."
 
 cat > /etc/nginx/sites-available/wireguard-dl << EOF
 server {
     listen $NGINX_PORT;
-    server_name $SERVER_DOMAIN;
+    server_name _;
     root /var/www/wireguard-dl;
 
     # Security headers
@@ -191,25 +173,40 @@ server {
     add_header X-Frame-Options DENY;
     add_header X-XSS-Protection "1; mode=block";
 
-    # Disable directory browsing
-    autoindex off;
+    # Disable logging for this site (privacy)
+    access_log off;
+    error_log off;
 
     # Root location (info page)
     location = / {
-        return 200 '🔐 WireGuard Download Server\n\nThis server provides temporary download links for WireGuard configurations.\n';
+        return 200 '🔐 WireGuard Secure Download Server\n\nThis server provides secure, expiring download links for WireGuard configurations.\nLinks are single-use and expire automatically.\n';
         add_header Content-Type text/plain;
     }
 
-    # Direct download location
-    location ~* \\.conf$ {
+    # Secure download location
+    location ~ ^/wg-dl/([0-9]+)/([a-f0-9]+)/(.+)$ {
+        # Secure link validation
+        secure_link \$2 \$1;
+        secure_link_md5 "\$secure_link_expires\$uri $SECRET_KEY";
+
+        # Check if link is valid
+        if (\$secure_link = "") {
+            return 403 '{"error":"Invalid download link","code":403}';
+        }
+
+        # Check if link has expired
+        if (\$secure_link = "0") {
+            return 410 '{"error":"Download link has expired","code":410}';
+        }
+
+        # Serve the file
+        try_files /\$3 =404;
+
         # Download headers
-        add_header Content-Disposition "attachment";
+        add_header Content-Disposition "attachment; filename=\$3";
         add_header Cache-Control "no-cache, no-store, must-revalidate";
         add_header Pragma no-cache;
         add_header Expires 0;
-
-        # Try to serve the file
-        try_files \$uri =404;
     }
 
     # Health check
@@ -218,12 +215,7 @@ server {
         add_header Content-Type text/plain;
     }
 
-    # Block access to sensitive files
-    location ~ /\. {
-        deny all;
-    }
-
-    # Block other requests
+    # Block all other requests
     location / {
         return 404 '{"error":"Not found","code":404}';
     }
@@ -251,17 +243,17 @@ log "Configuring firewall..."
 ufw allow $WG_PORT/udp >/dev/null 2>&1 || true
 ufw allow $NGINX_PORT/tcp >/dev/null 2>&1 || true
 
-# Create cleanup script for temporary files
+# Create cleanup script
 log "Creating cleanup script..."
 cat > /usr/local/bin/wg-cleanup << 'EOF'
 #!/bin/bash
-# Auto-cleanup old WireGuard config files (older than 24 hours)
+# Auto-cleanup expired WireGuard config files
 find /var/www/wireguard-dl -name "*.conf" -mtime +1 -delete 2>/dev/null
 EOF
 
 chmod +x /usr/local/bin/wg-cleanup
 
-# Add to crontab for automatic cleanup every 6 hours
+# Add to crontab for automatic cleanup
 (crontab -l 2>/dev/null || true; echo "0 */6 * * * /usr/local/bin/wg-cleanup") | crontab -
 
 # Verify installation
@@ -294,8 +286,8 @@ if [ "$VPN_MODE" = "full-routing" ]; then
 fi
 echo ""
 echo "🌐 Download Server URLs:"
-echo "Health Check: http://$SERVER_DOMAIN:$NGINX_PORT/health"
-echo "Info Page: http://$SERVER_DOMAIN:$NGINX_PORT/"
+echo "Health Check: http://$PUBLIC_IP:$NGINX_PORT/health"
+echo "Info Page: http://$PUBLIC_IP:$NGINX_PORT/"
 echo ""
 
 wg show

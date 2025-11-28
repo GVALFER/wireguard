@@ -26,7 +26,7 @@ WG_CLIENTS_DIR="/etc/wireguard/clients"
 DOWNLOAD_DIR="/var/www/wireguard-dl"
 NGINX_PORT="8080"
 SERVER_PUBLIC_IP_FILE="/etc/wireguard/server_public_ip.txt"
-SERVER_DOMAIN_FILE="/etc/wireguard/server_domain.txt"
+SERVER_SECRET_KEY_FILE="/etc/wireguard/server_secret_key.txt"
 
 # Check if WireGuard is configured
 if [[ ! -f $WG_CONFIG ]]; then
@@ -40,17 +40,29 @@ else
     PUBLIC_IP="localhost"
 fi
 
-if [[ -f $SERVER_DOMAIN_FILE ]]; then
-    SERVER_DOMAIN=$(cat $SERVER_DOMAIN_FILE)
+if [[ -f $SERVER_SECRET_KEY_FILE ]]; then
+    SECRET_KEY=$(cat $SERVER_SECRET_KEY_FILE)
 else
-    SERVER_DOMAIN="$PUBLIC_IP"
+    SECRET_KEY=""
 fi
 
 # Functions
-generate_download_link() {
+generate_secure_link() {
     local client_name="$1"
-    local download_url="http://${SERVER_DOMAIN}:${NGINX_PORT}/$client_name.conf"
-    echo "$download_url"
+    local expiry_hours="${2:-2}"
+
+    if [[ -z "$SECRET_KEY" ]]; then
+        error "Secret key not found. Secure links not available."
+    fi
+
+    local expire_time=$(($(date +%s) + expiry_hours * 3600))
+    local uri="/wg-dl/$expire_time/PLACEHOLDER/$client_name.conf"
+    local hash_input="${expire_time}${uri} ${SECRET_KEY}"
+    local secure_hash=$(echo -n "$hash_input" | md5sum | cut -d' ' -f1)
+    local secure_url="http://${PUBLIC_IP}:${NGINX_PORT}/wg-dl/$expire_time/$secure_hash/$client_name.conf"
+    local expire_date=$(date -d "@$expire_time" "+%Y-%m-%d %H:%M:%S UTC")
+
+    echo "$secure_url|$expire_date"
 }
 
 list_clients() {
@@ -135,8 +147,8 @@ show_status() {
 
     echo ""
     echo "🌐 Server URLs:"
-    echo "Health: http://$SERVER_DOMAIN:$NGINX_PORT/health"
-    echo "Info: http://$SERVER_DOMAIN:$NGINX_PORT/"
+    echo "Health: http://$PUBLIC_IP:$NGINX_PORT/health"
+    echo "Info: http://$PUBLIC_IP:$NGINX_PORT/"
     echo ""
 
     # WireGuard interface details
@@ -187,6 +199,7 @@ show_client() {
 
 create_download_link() {
     local client_name="$1"
+    local expiry_hours="${2:-2}"
     local client_file="$WG_CLIENTS_DIR/$client_name.conf"
     local download_file="$DOWNLOAD_DIR/$client_name.conf"
 
@@ -202,19 +215,21 @@ create_download_link() {
         chmod 644 "$download_file"
     fi
 
-    # Generate download link
-    local download_url=$(generate_download_link "$client_name")
+    # Generate secure link
+    local link_info=$(generate_secure_link "$client_name" "$expiry_hours")
+    local secure_url=$(echo "$link_info" | cut -d'|' -f1)
+    local expire_date=$(echo "$link_info" | cut -d'|' -f2)
 
-    echo "🔗 Download Link for: $client_name"
-    echo "=================================="
-    highlight "$download_url"
+    echo "🔗 Secure Download Link for: $client_name"
+    echo "=========================================="
+    highlight "$secure_url"
     echo ""
-    echo "📱 Temporary link for configuration download"
-    echo "⚠️  Files are automatically cleaned up after 24 hours"
+    echo "⏰ Expires: $expire_date"
+    echo "📱 Valid for: $expiry_hours hours"
     echo ""
     echo "📋 Download commands:"
-    echo "curl -O '$download_url'"
-    echo "wget '$download_url'"
+    echo "curl -O '$secure_url'"
+    echo "wget '$secure_url'"
 }
 
 remove_client() {
@@ -355,8 +370,8 @@ case "${1:-}" in
         show_client "$2"
         ;;
     "link"|"dl")
-        [[ -z $2 ]] && error "Usage: $0 link <client-name>"
-        create_download_link "$2"
+        [[ -z $2 ]] && error "Usage: $0 link <client-name> [hours]"
+        create_download_link "$2" "${3:-2}"
         ;;
     "remove"|"rm"|"r")
         [[ -z $2 ]] && error "Usage: $0 remove <client-name>"
@@ -404,7 +419,7 @@ case "${1:-}" in
         echo "  list, ls, l              List all clients with status"
         echo "  show, sh <client>        Show client config + QR code"
         echo "  remove, rm, r <client>   Remove client completely"
-        echo "  link, dl <client>        Generate download link"
+        echo "  link, dl <client> [hrs]  Generate secure download link"
         echo ""
         echo "📊 Server Management:"
         echo "  status, st, s            Show server status"
@@ -422,6 +437,6 @@ case "${1:-}" in
         echo "  Clients: $WG_CLIENTS_DIR"
         echo "  Downloads: $DOWNLOAD_DIR"
         echo ""
-        echo "🔗 Server: http://$SERVER_DOMAIN:$NGINX_PORT/"
+        echo "🔗 Server: http://$PUBLIC_IP:$NGINX_PORT/"
         ;;
 esac

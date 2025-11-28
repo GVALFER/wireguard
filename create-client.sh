@@ -30,33 +30,42 @@ WG_PORT="51820"
 NGINX_PORT="8080"
 SERVER_PUBLIC_KEY_FILE="/etc/wireguard/server_public.key"
 SERVER_PUBLIC_IP_FILE="/etc/wireguard/server_public_ip.txt"
-SERVER_DOMAIN_FILE="/etc/wireguard/server_domain.txt"
-
+SERVER_SECRET_KEY_FILE="/etc/wireguard/server_secret_key.txt"
 DOWNLOAD_DIR="/var/www/wireguard-dl"
 
 # Check files
 [[ -f $WG_SERVER_CONFIG ]] || error "Server config not found: $WG_SERVER_CONFIG"
 [[ -f $SERVER_PUBLIC_KEY_FILE ]] || error "Server public key not found"
 [[ -f $SERVER_PUBLIC_IP_FILE ]] || error "Server IP file not found"
+[[ -f $SERVER_SECRET_KEY_FILE ]] || error "Server secret key not found"
 
 SERVER_PUBLIC_KEY=$(cat $SERVER_PUBLIC_KEY_FILE)
 PUBLIC_IP=$(cat $SERVER_PUBLIC_IP_FILE)
+SECRET_KEY=$(cat $SERVER_SECRET_KEY_FILE)
+ENDPOINT="$PUBLIC_IP:$WG_PORT"
 
-# Use domain if available, fallback to IP for backward compatibility
-if [[ -f $SERVER_DOMAIN_FILE ]]; then
-    SERVER_DOMAIN=$(cat $SERVER_DOMAIN_FILE)
-else
-    warn "Domain file not found, using IP address for backward compatibility"
-    SERVER_DOMAIN="$PUBLIC_IP"
-fi
-
-ENDPOINT="$SERVER_DOMAIN:$WG_PORT"
-
-# Function to generate simple download URL
-generate_download_url() {
+# Function to generate secure download URL
+generate_secure_url() {
     local client_name="$1"
-    local download_url="http://${SERVER_DOMAIN}:${NGINX_PORT}/$client_name.conf"
-    echo "$download_url"
+    local expiry_hours="${2:-2}"  # Default 2 hours
+
+    # Calculate expiration timestamp
+    local expire_time=$(($(date +%s) + expiry_hours * 3600))
+
+    # URI path for hash calculation
+    local uri="/wg-dl/$expire_time/PLACEHOLDER/$client_name.conf"
+
+    # Generate MD5 hash
+    local hash_input="${expire_time}${uri} ${SECRET_KEY}"
+    local secure_hash=$(echo -n "$hash_input" | md5sum | cut -d' ' -f1)
+
+    # Final secure URL
+    local secure_url="http://${PUBLIC_IP}:${NGINX_PORT}/wg-dl/$expire_time/$secure_hash/$client_name.conf"
+
+    # Expiry time in human readable format
+    local expire_date=$(date -d "@$expire_time" "+%Y-%m-%d %H:%M:%S UTC")
+
+    echo "$secure_url|$expire_date"
 }
 
 # Get next available IP
@@ -84,6 +93,7 @@ fi
 
 CLIENT_NAME=$1
 CLIENT_IP_SUFFIX=${2:-}
+EXPIRY_HOURS=${3:-2}
 
 echo "🔐 Creating client: $CLIENT_NAME"
 echo "================================"
@@ -102,6 +112,7 @@ fi
 CLIENT_IP="$WG_NET.$CLIENT_IP_SUFFIX"
 
 log "Assigned IP: $CLIENT_IP"
+log "Link expires in: $EXPIRY_HOURS hours"
 
 echo ""
 ask "Server endpoint (default: $ENDPOINT):"
@@ -116,6 +127,7 @@ log "Client configuration:"
 echo "Name: $CLIENT_NAME"
 echo "IP: $CLIENT_IP"
 echo "Endpoint: $ENDPOINT"
+echo "Expiry: $EXPIRY_HOURS hours"
 echo ""
 
 ask "Create client? (Y/n):"
@@ -176,8 +188,10 @@ cp "$CLIENT_CONFIG_FILE" "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
 chown www-data:www-data "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
 chmod 644 "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
 
-# Generate download URL
-DOWNLOAD_URL=$(generate_download_url "$CLIENT_NAME")
+# Generate secure download URL
+SECURE_INFO=$(generate_secure_url "$CLIENT_NAME" "$EXPIRY_HOURS")
+SECURE_URL=$(echo "$SECURE_INFO" | cut -d'|' -f1)
+EXPIRE_DATE=$(echo "$SECURE_INFO" | cut -d'|' -f2)
 
 # Reload WireGuard
 log "Reloading configuration..."
@@ -187,21 +201,21 @@ wg syncconf $WG_INTERFACE <(wg-quick strip $WG_INTERFACE)
 log "✅ Client created!"
 
 echo ""
-echo "🔗 Download Link:"
-echo "=================="
-echo "$DOWNLOAD_URL"
+echo "🔗 Secure Download Link:"
+echo "========================"
+echo "$SECURE_URL"
 echo ""
-echo "📱 Temporary link for configuration download"
-echo "⚠️  Files are automatically cleaned up after 24 hours"
+echo "⏰ Link expires: $EXPIRE_DATE"
+echo "📱 This link is single-use and secure"
 echo ""
 
 echo "📋 Quick Download Commands:"
 echo "=========================="
 echo "# Download config file:"
-echo "curl -O '$DOWNLOAD_URL'"
+echo "curl -O '$SECURE_URL'"
 echo ""
 echo "# Or with custom name:"
-echo "curl '$DOWNLOAD_URL' -o my-vpn.conf"
+echo "curl '$SECURE_URL' -o my-vpn.conf"
 echo ""
 
 if command -v qrencode >/dev/null 2>&1; then
