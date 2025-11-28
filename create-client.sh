@@ -1,5 +1,5 @@
 #!/bin/bash
-# create-client.sh - WireGuard Client Creation Script
+# create-client.sh - WireGuard Client Creation with Secure Downloads
 
 set -e
 
@@ -27,42 +27,57 @@ WG_SERVER_CONFIG="/etc/wireguard/$WG_INTERFACE.conf"
 WG_CLIENTS_DIR="/etc/wireguard/clients"
 WG_NET="10.8.0"
 WG_PORT="51820"
+NGINX_PORT="8080"
 SERVER_PUBLIC_KEY_FILE="/etc/wireguard/server_public.key"
 SERVER_PUBLIC_IP_FILE="/etc/wireguard/server_public_ip.txt"
+SERVER_DOMAIN_FILE="/etc/wireguard/server_domain.txt"
+SERVER_SECRET_KEY_FILE="/etc/wireguard/server_secret_key.txt"
+DOWNLOAD_DIR="/var/www/wireguard-dl"
 
 # Check files
 [[ -f $WG_SERVER_CONFIG ]] || error "Server config not found: $WG_SERVER_CONFIG"
 [[ -f $SERVER_PUBLIC_KEY_FILE ]] || error "Server public key not found"
+[[ -f $SERVER_PUBLIC_IP_FILE ]] || error "Server IP file not found"
+# SERVER_DOMAIN_FILE is optional for backward compatibility
+[[ -f $SERVER_SECRET_KEY_FILE ]] || error "Server secret key not found"
 
 SERVER_PUBLIC_KEY=$(cat $SERVER_PUBLIC_KEY_FILE)
+PUBLIC_IP=$(cat $SERVER_PUBLIC_IP_FILE)
+SECRET_KEY=$(cat $SERVER_SECRET_KEY_FILE)
 
-# Get public IP
-if [[ -f $SERVER_PUBLIC_IP_FILE ]]; then
-    PUBLIC_IP=$(cat $SERVER_PUBLIC_IP_FILE)
+# Use domain if available, fallback to IP for backward compatibility
+if [[ -f $SERVER_DOMAIN_FILE ]]; then
+    SERVER_DOMAIN=$(cat $SERVER_DOMAIN_FILE)
 else
-    log "Detecting public IP..."
-    PUBLIC_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || curl -s icanhazip.com 2>/dev/null)
-    [[ -z "$PUBLIC_IP" ]] && error "Failed to detect public IP"
-    echo "$PUBLIC_IP" > $SERVER_PUBLIC_IP_FILE
+    warn "Domain file not found, using IP address for backward compatibility"
+    SERVER_DOMAIN="$PUBLIC_IP"
 fi
 
-ENDPOINT="$PUBLIC_IP:$WG_PORT"
+ENDPOINT="$SERVER_DOMAIN:$WG_PORT"
 
-# Get client name
-if [[ -z $1 ]]; then
-    echo "🔐 Creating client: $1"
-    echo "Usage: $0 <client-name> [ip-suffix]"
-    echo "Example: $0 laptop 5"
-    exit 1
-fi
+# Function to generate secure download URL
+generate_secure_url() {
+    local client_name="$1"
+    local expiry_hours="${2:-2}"  # Default 2 hours
 
-CLIENT_NAME=$1
-CLIENT_IP_SUFFIX=${2:-}
+    # Calculate expiration timestamp
+    local expire_time=$(($(date +%s) + expiry_hours * 3600))
 
-echo "🔐 Creating client: $CLIENT_NAME"
-echo "================================"
+    # URI path for hash calculation
+    local uri="/wg-dl/$expire_time/PLACEHOLDER/$client_name.conf"
 
-mkdir -p $WG_CLIENTS_DIR
+    # Generate MD5 hash
+    local hash_input="${expire_time}${uri} ${SECRET_KEY}"
+    local secure_hash=$(echo -n "$hash_input" | md5sum | cut -d' ' -f1)
+
+    # Final secure URL
+    local secure_url="http://${SERVER_DOMAIN}:${NGINX_PORT}/wg-dl/$expire_time/$secure_hash/$client_name.conf"
+
+    # Expiry time in human readable format
+    local expire_date=$(date -d "@$expire_time" "+%Y-%m-%d %H:%M:%S UTC")
+
+    echo "$secure_url|$expire_date"
+}
 
 # Get next available IP
 get_next_ip() {
@@ -76,6 +91,26 @@ get_next_ip() {
     error "No available IPs"
 }
 
+# Get client name
+if [[ -z $1 ]]; then
+    echo "🔐 WireGuard Client Creator with Secure Downloads"
+    echo "================================================="
+    echo ""
+    echo "Usage: $0 <client-name> [ip-suffix] [expiry-hours]"
+    echo "Example: $0 laptop 5 4"
+    echo ""
+    exit 1
+fi
+
+CLIENT_NAME=$1
+CLIENT_IP_SUFFIX=${2:-}
+EXPIRY_HOURS=${3:-2}
+
+echo "🔐 Creating client: $CLIENT_NAME"
+echo "================================"
+
+mkdir -p $WG_CLIENTS_DIR
+
 # Determine client IP
 if [[ -n $CLIENT_IP_SUFFIX ]]; then
     if grep -q "AllowedIPs = $WG_NET\.$CLIENT_IP_SUFFIX/32" $WG_SERVER_CONFIG; then
@@ -88,6 +123,9 @@ fi
 CLIENT_IP="$WG_NET.$CLIENT_IP_SUFFIX"
 
 log "Assigned IP: $CLIENT_IP"
+log "Link expires in: $EXPIRY_HOURS hours"
+
+echo ""
 ask "Server endpoint (default: $ENDPOINT):"
 read -p "> " custom_endpoint
 
@@ -100,7 +138,7 @@ log "Client configuration:"
 echo "Name: $CLIENT_NAME"
 echo "IP: $CLIENT_IP"
 echo "Endpoint: $ENDPOINT"
-echo "Routes: 0.0.0.0/0"
+echo "Expiry: $EXPIRY_HOURS hours"
 echo ""
 
 ask "Create client? (Y/n):"
@@ -119,7 +157,7 @@ cat > $CLIENT_CONFIG_FILE << EOF
 [Interface]
 PrivateKey = $CLIENT_PRIVATE_KEY
 Address = $CLIENT_IP/24
-DNS = 1.1.1.1
+DNS = 1.1.1.1, 8.8.8.8
 
 [Peer]
 PublicKey = $SERVER_PUBLIC_KEY
@@ -129,8 +167,8 @@ Endpoint = $ENDPOINT
 PersistentKeepalive = 25
 EOF
 
-# Create IPMI-only config
-cat > $WG_CLIENTS_DIR/$CLIENT_NAME-ipmi-only.conf << EOF
+# Create private-network-only config
+cat > $WG_CLIENTS_DIR/$CLIENT_NAME-private-only.conf << EOF
 [Interface]
 PrivateKey = $CLIENT_PRIVATE_KEY
 Address = $CLIENT_IP/24
@@ -156,21 +194,59 @@ PresharedKey = $CLIENT_PRESHARED_KEY
 AllowedIPs = $CLIENT_IP/32
 EOF
 
-# Reload
+# Copy to download directory
+cp "$CLIENT_CONFIG_FILE" "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
+chown www-data:www-data "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
+chmod 644 "$DOWNLOAD_DIR/$CLIENT_NAME.conf"
+
+# Generate secure download URL
+SECURE_INFO=$(generate_secure_url "$CLIENT_NAME" "$EXPIRY_HOURS")
+SECURE_URL=$(echo "$SECURE_INFO" | cut -d'|' -f1)
+EXPIRE_DATE=$(echo "$SECURE_INFO" | cut -d'|' -f2)
+
+# Reload WireGuard
 log "Reloading configuration..."
 wg syncconf $WG_INTERFACE <(wg-quick strip $WG_INTERFACE)
 
+# Generate QR code for mobile
 log "✅ Client created!"
 
 echo ""
-echo "📱 QR Code:"
-echo "==========="
-qrencode -t ansiutf8 < $CLIENT_CONFIG_FILE 2>/dev/null || echo "QR code generation failed"
-
+echo "🔗 Secure Download Link:"
+echo "========================"
+echo "$SECURE_URL"
 echo ""
-echo "📄 Configuration file:"
-echo "======================"
+echo "⏰ Link expires: $EXPIRE_DATE"
+echo "📱 This link is single-use and secure"
+echo ""
+
+echo "📋 Quick Download Commands:"
+echo "=========================="
+echo "# Download config file:"
+echo "curl -O '$SECURE_URL'"
+echo ""
+echo "# Or with custom name:"
+echo "curl '$SECURE_URL' -o my-vpn.conf"
+echo ""
+
+if command -v qrencode >/dev/null 2>&1; then
+    echo "📱 QR Code (for mobile import):"
+    echo "==============================="
+    qrencode -t ansiutf8 < $CLIENT_CONFIG_FILE 2>/dev/null || echo "QR code generation failed"
+    echo ""
+fi
+
+echo "📄 Configuration Preview:"
+echo "========================="
 cat $CLIENT_CONFIG_FILE
 
 echo ""
-log "🎉 Done! Client file: $CLIENT_CONFIG_FILE"
+echo "📊 Server Status:"
+wg show
+
+echo ""
+log "🎉 Done! Send the secure download link to your client."
+log "📂 Config files:"
+echo "   Full VPN: $CLIENT_CONFIG_FILE"
+echo "   Private Network Only: $WG_CLIENTS_DIR/$CLIENT_NAME-private-only.conf"
+echo "   Download: $DOWNLOAD_DIR/$CLIENT_NAME.conf"

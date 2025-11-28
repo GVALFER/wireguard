@@ -38,6 +38,7 @@ Three simple scripts that automatically detect your network configuration and se
 | `install-wireguard.sh` | Server Setup | Auto-detects NICs and installs WireGuard |
 | `create-client.sh` | Client Creation | Generates client configs with QR codes |
 | `wg-manage.sh` | Management | Quick client management commands |
+| `change-domain.sh` | Domain Config | Update server domain/IP for nginx |
 
 ## 🔧 Requirements
 
@@ -67,6 +68,12 @@ sudo ./install-wireguard.sh
 🚀 WireGuard Installation
 ========================
 
+Detecting public IP...
+Detected public IP: 185.225.112.3
+
+Do you want to use a custom domain for nginx? (y/N): y
+Enter your domain (e.g., vpn.yourdomain.com): vpn.company.com
+
 Found 2 NIC(s):
 1) ens18 (UP, 185.225.112.3/26)
 2) ens19 (UP, 192.168.1.4/24)
@@ -74,9 +81,15 @@ Found 2 NIC(s):
 Auto-configuration:
 NETWORK_1 (internet): ens18
 NETWORK_2 (private): ens19
+Server Domain/IP: vpn.company.com
 
 Continue with auto-configuration? (Y/n): 
 ```
+
+**🌐 Domain Configuration:**
+- **IP Mode (default)**: Uses server's public IP for all connections
+- **Custom Domain**: Use your own domain/subdomain (e.g., `vpn.company.com`)
+- **Benefits**: Professional appearance, easier to remember, SSL-ready
 
 ### 3. Create First Client
 
@@ -136,13 +149,19 @@ sudo ./create-client.sh admin-access
 
 During client creation, you can choose:
 
-- **Endpoint**: Your server's public domain/IP
+- **Endpoint**: Your server's configured domain or public IP
 - **Traffic routing**: All traffic vs. VPN+Private only
+- **Download links**: Secure, expiring links using your domain
 
 ```bash
-Server endpoint (domain:port, default: your-server.com:51820): vpn.company.com:51820
-Route all traffic through VPN? (Y/n): n
+Server endpoint (domain:port, default: vpn.company.com:51820): vpn.company.com:51820
 ```
+
+**📥 Secure Download Links:**
+- Generated using your configured domain (or IP)
+- Automatically expire after 2 hours (configurable)
+- Single-use for enhanced security
+- Example: `http://vpn.company.com:8080/wg-dl/1234567/abcdef/client.conf`
 
 ### Management Commands
 
@@ -214,6 +233,9 @@ PersistentKeepalive = 25
 - ✅ **Isolated client configs** in separate directory
 - ✅ **Proper iptables rules** for secure traffic flow
 - ✅ **No hardcoded credentials** - all auto-generated
+- ✅ **Secure download links** with automatic expiration
+- ✅ **Custom domain support** for professional deployment
+- ✅ **Nginx secure_link module** for download protection
 
 ## 🛠️ Customization
 
@@ -228,9 +250,13 @@ Port: 51820
 ### File Locations
 ```
 /etc/wireguard/wg0.conf          # Server configuration
-/etc/wireguard/clients/          # Client configurations  
-/etc/wireguard/server.env        # Server settings
+/etc/wireguard/clients/          # Client configurations
+/etc/wireguard/server_public_ip.txt    # Server public IP
+/etc/wireguard/server_domain.txt       # Server domain/IP for nginx
+/etc/wireguard/server_secret_key.txt   # Secret key for secure links
 /etc/wireguard/server_*.key      # Server keys
+/var/www/wireguard-dl/           # Download directory for client configs
+/etc/nginx/sites-available/wireguard-dl # Nginx configuration for downloads
 ```
 
 ## 🐛 Troubleshooting
@@ -295,9 +321,31 @@ PostUp = echo "WireGuard started" | logger; <existing-rules>
 sudo ./create-client.sh new-device-name
 ```
 
+### Creating Secure Download Links
+```bash
+# Generate 2-hour expiring link
+sudo ./wg-manage.sh link client-name
+
+# Generate 6-hour expiring link  
+sudo ./wg-manage.sh link client-name 6
+```
+
 ### Removing Clients
 ```bash
 sudo ./wg-manage.sh remove device-name
+```
+
+### Domain Configuration Management
+```bash
+# Change domain interactively (recommended)
+sudo ./change-domain.sh
+
+# Check current domain setting
+cat /etc/wireguard/server_domain.txt
+
+# Manual domain update (advanced)
+echo "new-vpn.domain.com" | sudo tee /etc/wireguard/server_domain.txt
+sudo systemctl restart nginx
 ```
 
 ### Backup Configuration
