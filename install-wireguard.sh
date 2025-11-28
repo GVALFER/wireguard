@@ -123,12 +123,8 @@ log "Installing packages..."
 apt update -qq
 apt install -y wireguard wireguard-tools qrencode nginx openssl >/dev/null 2>&1
 
-# Check nginx secure_link module
-log "Checking Nginx modules..."
-if ! nginx -V 2>&1 | grep -q "http_secure_link_module"; then
-    warn "Nginx secure_link module not found. Links may not work properly."
-    warn "Consider recompiling nginx with --with-http_secure_link_module"
-fi
+# No need to check nginx modules - using simple file serving
+log "Configuring nginx for simple file downloads..."
 
 # Enable forwarding
 log "Enabling IP forwarding..."
@@ -148,8 +144,7 @@ SERVER_PUBLIC_KEY=$(cat server_public.key)
 # Save configuration for client script
 echo "$PUBLIC_IP" > server_public_ip.txt
 echo "$SERVER_DOMAIN" > server_domain.txt
-echo "$SECRET_KEY" > server_secret_key.txt
-chmod 600 server_secret_key.txt
+chmod 644 server_domain.txt
 
 # Create WireGuard config
 log "Creating WireGuard configuration..."
@@ -182,8 +177,8 @@ mkdir -p /var/www/wireguard-dl
 chown www-data:www-data /var/www/wireguard-dl
 chmod 755 /var/www/wireguard-dl
 
-# Configure Nginx for secure downloads
-log "Configuring Nginx for secure downloads..."
+# Configure Nginx for simple downloads
+log "Configuring Nginx for temporary downloads..."
 
 cat > /etc/nginx/sites-available/wireguard-dl << EOF
 server {
@@ -196,40 +191,25 @@ server {
     add_header X-Frame-Options DENY;
     add_header X-XSS-Protection "1; mode=block";
 
-    # Disable logging for this site (privacy)
-    access_log off;
-    error_log off;
+    # Disable directory browsing
+    autoindex off;
 
     # Root location (info page)
     location = / {
-        return 200 '🔐 WireGuard Secure Download Server\n\nThis server provides secure, expiring download links for WireGuard configurations.\nLinks are single-use and expire automatically.\n';
+        return 200 '🔐 WireGuard Download Server\n\nThis server provides temporary download links for WireGuard configurations.\n';
         add_header Content-Type text/plain;
     }
 
-    # Secure download location
-    location ~ ^/wg-dl/([0-9]+)/([a-f0-9]+)/(.+)$ {
-        # Secure link validation
-        secure_link \$2 \$1;
-        secure_link_md5 "\$secure_link_expires\$uri $SECRET_KEY";
-
-        # Check if link is valid
-        if (\$secure_link = "") {
-            return 403 '{"error":"Invalid download link","code":403}';
-        }
-
-        # Check if link has expired
-        if (\$secure_link = "0") {
-            return 410 '{"error":"Download link has expired","code":410}';
-        }
-
-        # Serve the file
-        try_files /\$3 =404;
-
+    # Direct download location
+    location ~* \\.conf$ {
         # Download headers
-        add_header Content-Disposition "attachment; filename=\$3";
+        add_header Content-Disposition "attachment";
         add_header Cache-Control "no-cache, no-store, must-revalidate";
         add_header Pragma no-cache;
         add_header Expires 0;
+
+        # Try to serve the file
+        try_files \$uri =404;
     }
 
     # Health check
@@ -238,7 +218,12 @@ server {
         add_header Content-Type text/plain;
     }
 
-    # Block all other requests
+    # Block access to sensitive files
+    location ~ /\. {
+        deny all;
+    }
+
+    # Block other requests
     location / {
         return 404 '{"error":"Not found","code":404}';
     }
@@ -266,17 +251,17 @@ log "Configuring firewall..."
 ufw allow $WG_PORT/udp >/dev/null 2>&1 || true
 ufw allow $NGINX_PORT/tcp >/dev/null 2>&1 || true
 
-# Create cleanup script
+# Create cleanup script for temporary files
 log "Creating cleanup script..."
 cat > /usr/local/bin/wg-cleanup << 'EOF'
 #!/bin/bash
-# Auto-cleanup expired WireGuard config files
+# Auto-cleanup old WireGuard config files (older than 24 hours)
 find /var/www/wireguard-dl -name "*.conf" -mtime +1 -delete 2>/dev/null
 EOF
 
 chmod +x /usr/local/bin/wg-cleanup
 
-# Add to crontab for automatic cleanup
+# Add to crontab for automatic cleanup every 6 hours
 (crontab -l 2>/dev/null || true; echo "0 */6 * * * /usr/local/bin/wg-cleanup") | crontab -
 
 # Verify installation

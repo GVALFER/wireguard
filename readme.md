@@ -87,7 +87,7 @@ Continue with auto-configuration? (Y/n):
 ```
 
 **🌐 Domain Configuration:**
-- **IP Mode (default)**: Uses server's public IP for all connections
+- **IP Mode (default)**: Uses server's public IP for nginx downloads
 - **Custom Domain**: Use your own domain/subdomain (e.g., `vpn.company.com`)
 - **Benefits**: Professional appearance, easier to remember, SSL-ready
 
@@ -149,19 +149,19 @@ sudo ./create-client.sh admin-access
 
 During client creation, you can choose:
 
-- **Endpoint**: Your server's configured domain or public IP
+- **Endpoint**: Your server's configured domain or public IP  
 - **Traffic routing**: All traffic vs. VPN+Private only
-- **Download links**: Secure, expiring links using your domain
+- **Download links**: Temporary links using your domain with auto-cleanup
 
 ```bash
 Server endpoint (domain:port, default: vpn.company.com:51820): vpn.company.com:51820
 ```
 
-**📥 Secure Download Links:**
+**📥 Temporary Download Links:**
 - Generated using your configured domain (or IP)
-- Automatically expire after 2 hours (configurable)
-- Single-use for enhanced security
-- Example: `http://vpn.company.com:8080/wg-dl/1234567/abcdef/client.conf`
+- Files automatically cleaned up after 24 hours
+- Simple direct download links
+- Example: `http://vpn.company.com:8080/client.conf`
 
 ### Management Commands
 
@@ -233,9 +233,9 @@ PersistentKeepalive = 25
 - ✅ **Isolated client configs** in separate directory
 - ✅ **Proper iptables rules** for secure traffic flow
 - ✅ **No hardcoded credentials** - all auto-generated
-- ✅ **Secure download links** with automatic expiration
+- ✅ **Temporary download links** with automatic cleanup
 - ✅ **Custom domain support** for professional deployment
-- ✅ **Nginx secure_link module** for download protection
+- ✅ **Simple nginx configuration** for easy deployment
 
 ## 🛠️ Customization
 
@@ -253,7 +253,7 @@ Port: 51820
 /etc/wireguard/clients/          # Client configurations
 /etc/wireguard/server_public_ip.txt    # Server public IP
 /etc/wireguard/server_domain.txt       # Server domain/IP for nginx
-/etc/wireguard/server_secret_key.txt   # Secret key for secure links
+
 /etc/wireguard/server_*.key      # Server keys
 /var/www/wireguard-dl/           # Download directory for client configs
 /etc/nginx/sites-available/wireguard-dl # Nginx configuration for downloads
@@ -321,13 +321,10 @@ PostUp = echo "WireGuard started" | logger; <existing-rules>
 sudo ./create-client.sh new-device-name
 ```
 
-### Creating Secure Download Links
+### Creating Download Links
 ```bash
-# Generate 2-hour expiring link
+# Generate temporary download link
 sudo ./wg-manage.sh link client-name
-
-# Generate 6-hour expiring link  
-sudo ./wg-manage.sh link client-name 6
 ```
 
 ### Removing Clients

@@ -162,10 +162,11 @@ if [[ "$WG_STATUS" = "✅" && "$NGINX_STATUS" = "✅" ]]; then
     echo "1. New client download links will use: $NEW_DOMAIN"
     echo "2. Existing clients are not affected (they use WireGuard endpoints)"
     echo "3. Test the new URLs above to verify functionality"
+    echo "4. Download files are temporary and cleaned up after 24 hours"
 
     if [[ "$NEW_DOMAIN" != "$PUBLIC_IP" ]]; then
-        echo "4. Ensure your domain '$NEW_DOMAIN' points to IP: $PUBLIC_IP"
-        echo "5. Consider setting up SSL/TLS for https://$NEW_DOMAIN"
+        echo "5. Ensure your domain '$NEW_DOMAIN' points to IP: $PUBLIC_IP"
+        echo "6. Consider setting up SSL/TLS for https://$NEW_DOMAIN"
     fi
 else
     warn "⚠️ Some services may need attention. Check logs:"

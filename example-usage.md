@@ -1,6 +1,6 @@
 # Exemplo de Uso - WireGuard com Domínio Personalizado
 
-Este documento demonstra como usar os scripts de WireGuard com a nova funcionalidade de domínio personalizado para o nginx.
+Este documento demonstra como usar os scripts de WireGuard com domínio personalizado e links temporários para download de configurações.
 
 ## 🚀 Instalação com Domínio Personalizado
 
@@ -102,24 +102,23 @@ Create client? (Y/n): y
 
 ✅ Client created!
 
-🔗 Secure Download Link:
-========================
-http://vpn.empresa.com:8080/wg-dl/1701234567/a1b2c3d4e5f6/laptop-joao.conf
+🔗 Download Link:
+==================
+http://vpn.empresa.com:8080/laptop-joao.conf
 
-⏰ Link expires: 2023-11-29 15:30:00 UTC
-📱 This link is single-use and secure
+📱 Temporary link for configuration download
+⚠️  Files are automatically cleaned up after 24 hours
 ```
 
-### Cliente com Link Personalizado (6 horas)
+### Cliente com IP Específico
 
 ```bash
-sudo ./create-client.sh celular-maria 10 6
+sudo ./create-client.sh celular-maria 10
 ```
 
 **Explicação dos parâmetros:**
 - `celular-maria`: nome do cliente
 - `10`: IP suffix (10.8.0.10)
-- `6`: expiração do link em 6 horas
 
 ## 🔧 Gerenciamento
 
@@ -142,21 +141,21 @@ Legend: ✅Config 📥Download 🟢Connected 🟡Configured ⚫Offline ❌Missin
 ### Gerar Novo Link de Download
 
 ```bash
-sudo ./wg-manage.sh link laptop-joao 4
+sudo ./wg-manage.sh link laptop-joao
 ```
 
 **Saída:**
 ```
-🔗 Secure Download Link for: laptop-joao
-==========================================
-http://vpn.empresa.com:8080/wg-dl/1701238167/f6e5d4c3b2a1/laptop-joao.conf
+🔗 Download Link for: laptop-joao
+==================================
+http://vpn.empresa.com:8080/laptop-joao.conf
 
-⏰ Expires: 2023-11-29 16:30:00 UTC
-📱 Valid for: 4 hours
+📱 Temporary link for configuration download
+⚠️  Files are automatically cleaned up after 24 hours
 
 📋 Download commands:
-curl -O 'http://vpn.empresa.com:8080/wg-dl/1701238167/f6e5d4c3b2a1/laptop-joao.conf'
-wget 'http://vpn.empresa.com:8080/wg-dl/1701238167/f6e5d4c3b2a1/laptop-joao.conf'
+curl -O 'http://vpn.empresa.com:8080/laptop-joao.conf'
+wget 'http://vpn.empresa.com:8080/laptop-joao.conf'
 ```
 
 ### Status do Servidor
@@ -277,12 +276,12 @@ sudo systemctl restart nginx
 
 ### Com Domínio Personalizado
 - Health Check: `http://vpn.empresa.com:8080/health`
-- Download Link: `http://vpn.empresa.com:8080/wg-dl/1701234567/abc123/cliente.conf`
+- Download Link: `http://vpn.empresa.com:8080/cliente.conf`
 - Info Page: `http://vpn.empresa.com:8080/`
 
 ### Com IP (modo padrão)
 - Health Check: `http://203.0.113.10:8080/health`
-- Download Link: `http://203.0.113.10:8080/wg-dl/1701234567/abc123/cliente.conf`
+- Download Link: `http://203.0.113.10:8080/cliente.conf`
 - Info Page: `http://203.0.113.10:8080/`
 
 ## ✅ Verificação de Funcionamento
@@ -302,8 +301,8 @@ curl http://vpn.empresa.com:8080/
 ### 3. Testar Link de Download
 ```bash
 # Use um link real gerado pelo sistema
-curl -I "http://vpn.empresa.com:8080/wg-dl/1701234567/abc123/cliente.conf"
-# Resposta esperada: HTTP/1.1 200 OK ou 403/410 se inválido/expirado
+curl -I "http://vpn.empresa.com:8080/cliente.conf"
+# Resposta esperada: HTTP/1.1 200 OK ou 404 se arquivo não existe
 ```
 
 ## 🎯 Casos de Uso
@@ -316,7 +315,7 @@ sudo ./install-wireguard.sh
 
 # Criar clientes para funcionários
 sudo ./create-client.sh funcionario-joao
-sudo ./create-client.sh gerente-maria 5 8  # IP específico, link 8h
+sudo ./create-client.sh gerente-maria 5  # IP específico
 ```
 
 ### Uso Pessoal com IP
@@ -365,3 +364,4 @@ Após a instalação com domínio, você encontrará:
 3. **Flexível**: Pode mudar IP sem afetar clientes
 4. **SSL-Ready**: Pronto para certificados HTTPS
 5. **Branding**: Usa seu domínio da empresa
+6. **Simplicidade**: Links diretos e limpeza automática após 24h
