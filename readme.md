@@ -12,8 +12,8 @@ Three simple scripts that automatically detect your network configuration and se
 
 ### ✨ Features
 
-- 🔍 **Auto-detects network interfaces** - No manual NIC configuration needed
-- 🔧 **Generic design** - Works for any network setup (not just IPMIs)
+- 🔍 **Auto-detects network interfaces**
+- 🔧 **Generic design** - Works for any network setup
 - 📱 **QR codes** - Instant mobile device setup
 - 🛡️ **Security first** - Pre-shared keys and proper iptables rules
 - ⚡ **Fast setup** - VPN ready in under 2 minutes
@@ -28,17 +28,17 @@ Three simple scripts that automatically detect your network configuration and se
 │ NETWORK_1 (ens18) ──────► Internet      │
 │ NETWORK_2 (ens19) ──────► Private LAN   │
 │                                         │
-│ wg0: 10.8.0.1/24 ────────► VPN Clients │
+│ wg0: 10.8.0.1/24 ────────► VPN Clients  │
 └─────────────────────────────────────────┘
 ```
 
 ## 📦 What's Included
 
-| Script | Purpose | Description |
-|--------|---------|-------------|
-| `install-wireguard.sh` | Server Setup | Auto-detects NICs and installs WireGuard |
-| `create-client.sh` | Client Creation | Generates client configs with QR codes |
-| `wg-manage.sh` | Management | Quick client management commands |
+| Script                  | Purpose          | Description                              |
+|-------------------------|------------------|------------------------------------------|
+| `install-wireguard.sh`  | Server Setup     | Auto-detects NICs and installs WireGuard |
+| `create-client.sh`      | Client Creation  | Generates client configs with QR codes   |
+| `wg-manage.sh`          | Management       | Quick client management commands         |
 
 ## 🔧 Requirements
 
